@@ -1,0 +1,6 @@
+pybluez
+project_env
+logs
+__pycache__/
+*.py[cod]
+*.pyo
