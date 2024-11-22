@@ -1,18 +1,29 @@
 import tkinter as tk
 from tkinter import ttk
-import serial
-import time
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import max30102
+import hrcalc
+from datetime import datetime, timedelta
+import os
+from collections import deque
 
-# Update with the Bluetooth serial port
-ser = serial.Serial("/dev/rfcomm0", 115200)  # Replace with your Bluetooth port
+LOG_DIR = "./logs"  # Directory to store log files
 
-# Metrics calculation parameters
-heart_rates = []
-window_size = 4  # Can be adjusted for averaging
-time_data = []  # List to store time data for plotting
+# Ensure the log directory exists
+if not os.path.exists(LOG_DIR):
+    os.makedirs(LOG_DIR)
+
+# Create a new log file with the current date and time
+timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+current_log_file = os.path.join(LOG_DIR, f"log_{timestamp}.log")
+with open(current_log_file, "w") as log_file:
+    log_file.write(f"Log file created on {datetime.now()}\n")
+
+print(f"New log file created: {current_log_file}")
+
+m = max30102.MAX30102()
 
 
 # RMSSD calculation
@@ -26,62 +37,100 @@ def calculate_hrstd(rates):
     return np.std(rates)
 
 
+# Generate mock data (simulating heart rate values)
+def generate_data():
+    # 100 samples are read and used for HR/SpO2 calculation in a single loop
+    red, ir = m.read_sequential()
+    # TODO: should get IPM
+    bpm = hrcalc.calc_hr_and_spo2(ir, red)
+
+    return bpm
+
+
+def save_log(bpm):
+    global current_log_file
+
+    if bpm < 0:
+        return
+
+    try:
+        with open(current_log_file, "a") as log_file:
+            # Get the current timestamp in a readable format
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # Write the log with the timestamp
+            log_file.write(f"{timestamp} - {bpm}\n")
+    except IOError as e:
+        print(f"Error saving raw data: {e}")
+
+
+def get_data_from_log():
+    # Define a time window of 1 minute
+    time_window = timedelta(minutes=1)
+    current_time = datetime.now()
+
+    # Use deque to efficiently store lines within the last 30 seconds
+    recent_lines = deque()
+
+    with open(current_log_file, "r") as file:
+        for line in file:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Extract the timestamp from the line
+            try:
+                timestamp_str, data = line.split(
+                    " - ", 1)  # Split into timestamp and data
+                log_time = datetime.strptime(timestamp_str,
+                                             "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                continue  # Skip lines that don't have the expected format
+
+            # Check if the log is within the last 30 seconds
+            if current_time - log_time <= time_window:
+                recent_lines.append(data)  # Add the line to recent lines
+
+    time_data, heart_rates = [], []
+    for i, line in enumerate(recent_lines):
+        values = line.split(" - ")
+        time_data.append(i)
+        heart_rates.append(int(values[0]))
+
+    return time_data, heart_rates
+
+
 # Update GUI with new data
 def update_data():
-    global heart_rates, time_data
+    # Generate mock data instead of reading from Bluetooth
+    bpm = generate_data()
 
-    if ser.in_waiting:
-        data = ser.readline().decode().strip()
-        print(data)  # For debugging
+    save_log(bpm)
+    time_data, heart_rates = get_data_from_log()
 
-        try:
-            ir_value, bpm, avg_bpm = parse_data(data)  # Parse incoming data
+    # Calculate metrics
+    bpm_label.config(text=f"BPM: {bpm}")
+    ipm_label.config(text=f"IPM: {int(bpm * 1.5)}")  # Example IPM calculation
+    rmssd_label.config(text=f"RMSSD: {calculate_rmssd(heart_rates):.2f}")
+    hrstd_label.config(text=f"HRSTD: {calculate_hrstd(heart_rates):.2f}")
 
-            # Append heart rate data
-            heart_rates.append(avg_bpm)
-            time_data.append(
-                time.time()
-            )  # Store the current time for x-axis of the plot
+    # Update plot with new data
+    update_plot(time_data, heart_rates)
 
-            if len(heart_rates) > window_size:
-                heart_rates.pop(0)
-                time_data.pop(0)  # Remove old time data to maintain window size
-
-            # Calculate metrics
-            bpm_label.config(text=f"BPM: {bpm}")
-            avg_bpm_label.config(text=f"Avg BPM: {avg_bpm}")
-            ipm_label.config(text=f"IPM: {int(bpm * 1.5)}")  # Example IPM calculation
-            rmssd_label.config(text=f"RMSSD: {calculate_rmssd(heart_rates):.2f}")
-            hrstd_label.config(text=f"HRSTD: {calculate_hrstd(heart_rates):.2f}")
-
-            # Update plot with new data
-            update_plot()
-
-        except ValueError:
-            pass  # Ignore parsing errors
-
-    root.after(1000, update_data)  # Schedule next update
+    # Schedule the next update
+    root.after(1000, update_data)  # Update every second
 
 
-def update_plot():
+def update_plot(time_data, heart_rates):
     ax.clear()  # Clear previous plot
-    ax.plot(
-        time_data, heart_rates, label="Heart Rate", color="r"
-    )  # Draw a line for the heartbeat
+    print(heart_rates)
+    ax.plot(time_data, heart_rates, label="IPM / BPM",
+            color='r')  # Draw a line for the heartbeat
     ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Heart Rate (BPM)")
+    ax.set_ylabel("Heart Rate (BPM / IPM)")
     ax.set_title("Heartbeat over Time")
     ax.legend()
 
     canvas.draw()  # Redraw canvas to update the plot
-
-
-def parse_data(data):
-    parts = data.split(",")
-    ir_value = int(parts[0].split("=")[1])
-    bpm = float(parts[1].split("=")[1])
-    avg_bpm = int(parts[2].split("=")[1])
-    return ir_value, bpm, avg_bpm
 
 
 # Set up tkinter GUI
@@ -91,20 +140,17 @@ root.title("Heart Rate Monitor")
 # Labels for metrics
 bpm_label = ttk.Label(root, text="BPM: --")
 bpm_label.grid(row=0, column=0)
-avg_bpm_label = ttk.Label(root, text="Avg BPM: --")
-avg_bpm_label.grid(row=1, column=0)
 ipm_label = ttk.Label(root, text="IPM: --")
-ipm_label.grid(row=2, column=0)
+ipm_label.grid(row=1, column=0)
 rmssd_label = ttk.Label(root, text="RMSSD: --")
-rmssd_label.grid(row=3, column=0)
+rmssd_label.grid(row=2, column=0)
 hrstd_label = ttk.Label(root, text="HRSTD: --")
-hrstd_label.grid(row=4, column=0)
+hrstd_label.grid(row=3, column=0)
 
 # Create figure for the plot
 fig, ax = plt.subplots(figsize=(6, 4))
-ax.set_xlabel("Time (s)")
-ax.set_ylabel("Heart Rate (BPM)")
-ax.set_title("Heartbeat over Time")
+ax.set_xlim(0, 60)  # x-axis (30 data points)
+ax.set_ylim(0, 200)  # y-axis (light values between 0 and 1024)
 
 # Embed the plot in the tkinter window
 canvas = FigureCanvasTkAgg(fig, master=root)
