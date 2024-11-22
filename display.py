@@ -8,22 +8,9 @@ import hrcalc
 from datetime import datetime, timedelta
 import os
 from collections import deque
+from bluetooth_receiver import BluetoothReceiver
 
 LOG_DIR = "./logs"  # Directory to store log files
-
-# Ensure the log directory exists
-if not os.path.exists(LOG_DIR):
-    os.makedirs(LOG_DIR)
-
-# Create a new log file with the current date and time
-timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-current_log_file = os.path.join(LOG_DIR, f"log_{timestamp}.log")
-with open(current_log_file, "w") as log_file:
-    log_file.write(f"Log file created on {datetime.now()}\n")
-
-print(f"New log file created: {current_log_file}")
-
-m = max30102.MAX30102()
 
 
 # RMSSD calculation
@@ -47,9 +34,7 @@ def generate_data():
     return bpm
 
 
-def save_log(bpm):
-    global current_log_file
-
+def save_log(bpm, current_log_file):
     if bpm < 0:
         return
 
@@ -63,7 +48,7 @@ def save_log(bpm):
         print(f"Error saving raw data: {e}")
 
 
-def get_data_from_log():
+def get_data_from_log(current_log_file):
     # Define a time window of 1 minute
     time_window = timedelta(minutes=1)
     current_time = datetime.now()
@@ -100,12 +85,11 @@ def get_data_from_log():
 
 
 # Update GUI with new data
-def update_data():
-    # Generate mock data instead of reading from Bluetooth
-    bpm = generate_data()
+def update_data(receiver, current_log_file):
+    bpm = int(receiver.read_data())
 
-    save_log(bpm)
-    time_data, heart_rates = get_data_from_log()
+    save_log(bpm, current_log_file)
+    time_data, heart_rates = get_data_from_log(current_log_file)
 
     # Calculate metrics
     bpm_label.config(text=f"BPM: {bpm}")
@@ -117,7 +101,8 @@ def update_data():
     update_plot(time_data, heart_rates)
 
     # Schedule the next update
-    root.after(1000, update_data)  # Update every second
+    root.after(1000, update_data(receiver,
+                                 current_log_file))  # Update every second
 
 
 def update_plot(time_data, heart_rates):
@@ -133,29 +118,53 @@ def update_plot(time_data, heart_rates):
     canvas.draw()  # Redraw canvas to update the plot
 
 
-# Set up tkinter GUI
-root = tk.Tk()
-root.title("Heart Rate Monitor")
+# Example usage
+if __name__ == "__main__":
+    # Ensure the log directory exists
+    if not os.path.exists(LOG_DIR):
+        os.makedirs(LOG_DIR)
 
-# Labels for metrics
-bpm_label = ttk.Label(root, text="BPM: --")
-bpm_label.grid(row=0, column=0)
-ipm_label = ttk.Label(root, text="IPM: --")
-ipm_label.grid(row=1, column=0)
-rmssd_label = ttk.Label(root, text="RMSSD: --")
-rmssd_label.grid(row=2, column=0)
-hrstd_label = ttk.Label(root, text="HRSTD: --")
-hrstd_label.grid(row=3, column=0)
+    # Create a new log file with the current date and time
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    current_log_file = os.path.join(LOG_DIR, f"log_{timestamp}.log")
+    with open(current_log_file, "w") as log_file:
+        log_file.write(f"Log file created on {datetime.now()}\n")
 
-# Create figure for the plot
-fig, ax = plt.subplots(figsize=(6, 4))
-ax.set_xlim(0, 60)  # x-axis (30 data points)
-ax.set_ylim(0, 200)  # y-axis (light values between 0 and 1024)
+    print(f"New log file created: {current_log_file}")
 
-# Embed the plot in the tkinter window
-canvas = FigureCanvasTkAgg(fig, master=root)
-canvas.get_tk_widget().grid(row=0, column=1, rowspan=6)
+    # m = max30102.MAX30102()
+    try:
+        receiver = BluetoothReceiver()
+        receiver.start_server()
 
-# Start the GUI loop
-root.after(1000, update_data)  # Initial call to start the loop
-root.mainloop()
+        # Set up tkinter GUI
+        root = tk.Tk()
+        root.title("Heart Rate Monitor")
+
+        # Labels for metrics
+        bpm_label = ttk.Label(root, text="BPM: --")
+        bpm_label.grid(row=0, column=0)
+        ipm_label = ttk.Label(root, text="IPM: --")
+        ipm_label.grid(row=1, column=0)
+        rmssd_label = ttk.Label(root, text="RMSSD: --")
+        rmssd_label.grid(row=2, column=0)
+        hrstd_label = ttk.Label(root, text="HRSTD: --")
+        hrstd_label.grid(row=3, column=0)
+
+        # Create figure for the plot
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.set_xlim(0, 60)  # x-axis (30 data points)
+        ax.set_ylim(0, 200)  # y-axis (light values between 0 and 1024)
+
+        # Embed the plot in the tkinter window
+        canvas = FigureCanvasTkAgg(fig, master=root)
+        canvas.get_tk_widget().grid(row=0, column=1, rowspan=6)
+
+        root.after(1000, update_data(
+            receiver, current_log_file))  # Initial call to start the loop
+        root.mainloop()
+
+    except KeyboardInterrupt:
+        print("Shutting down server...")
+    finally:
+        receiver.stop_server()

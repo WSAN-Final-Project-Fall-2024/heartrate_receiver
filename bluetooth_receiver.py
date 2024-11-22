@@ -4,6 +4,7 @@ import atexit
 
 
 class BluetoothReceiver:
+
     def __init__(self, port=1):
         """
         Initialize the BluetoothReceiver object.
@@ -97,19 +98,19 @@ class BluetoothReceiver:
 # Register the disable_bluetooth function to run at script exit
 atexit.register(BluetoothReceiver.disable_bluetooth, BluetoothReceiver)
 
-# Example usage
-if __name__ == "__main__":
-    receiver = BluetoothReceiver()
+# # Example usage
+# if __name__ == "__main__":
+#     receiver = BluetoothReceiver()
 
-    try:
-        receiver.start_server()
+#     try:
+#         receiver.start_server()
 
-        # Continuously read data from the client
-        while True:
-            data = receiver.read_data()
-            if data:
-                print(f"Received: {data}")
-    except KeyboardInterrupt:
-        print("Shutting down server...")
-    finally:
-        receiver.stop_server()
+#         # Continuously read data from the client
+#         while True:
+#             data = receiver.read_data()
+#             if data:
+#                 print(f"Received: {data}")
+#     except KeyboardInterrupt:
+#         print("Shutting down server...")
+#     finally:
+#         receiver.stop_server()
