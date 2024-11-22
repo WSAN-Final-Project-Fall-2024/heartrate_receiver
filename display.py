@@ -3,8 +3,6 @@ from tkinter import ttk
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import max30102
-import hrcalc
 from datetime import datetime, timedelta
 import os
 from collections import deque
@@ -22,16 +20,6 @@ def calculate_rmssd(rates):
 # HRSTD calculation
 def calculate_hrstd(rates):
     return np.std(rates)
-
-
-# Generate mock data (simulating heart rate values)
-def generate_data():
-    # 100 samples are read and used for HR/SpO2 calculation in a single loop
-    red, ir = m.read_sequential()
-    # TODO: should get IPM
-    bpm = hrcalc.calc_hr_and_spo2(ir, red)
-
-    return bpm
 
 
 def save_log(bpm, current_log_file):
@@ -132,7 +120,6 @@ if __name__ == "__main__":
 
     print(f"New log file created: {current_log_file}")
 
-    # m = max30102.MAX30102()
     try:
         receiver = BluetoothReceiver()
         receiver.start_server()
