@@ -8,14 +8,12 @@ import json
 
 
 def update_plot(raw_data):
-    print(raw_data)
     ax.clear()
-    ax.plot(range(len(raw_data)), raw_data, label="IPM / BPM",
+    ax.plot(range(len(raw_data)), raw_data,
             color='r')  # Draw a line for the heartbeat
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Heart Rate (BPM / IPM)")
-    ax.set_title("Heartbeat over Time")
-    ax.legend()
+    ax.set_xlabel("Time")
+    ax.set_ylabel("IR")
+    ax.set_title("Heartbeat")
 
     canvas.draw()  # Redraw canvas to update the plot
 
@@ -56,7 +54,7 @@ def format_value(label, value, precision=2, invalid_placeholder="--"):
     return f"{label}: {invalid_placeholder}"
 
 
-def update_gui_with_threading(current_log_file):
+def update_gui_with_threading():
     """
     Function to update the GUI, retrieving data from the queue.
     """
@@ -71,7 +69,7 @@ def update_gui_with_threading(current_log_file):
         hrstd = data.get('hrstd', -1)
 
         # Update labels using helper function
-        bpm_label.config(text=format_value("BPM", bpm))
+        bpm_label.config(text=f'{format_value("Heart Rate", bpm)} bpm')
         ipm_label.config(text=format_value("IPM", ipm))
         rmssd_label.config(text=format_value("RMSSD", rmssd))
         hrstd_label.config(text=format_value("HRSTD", hrstd))
@@ -80,7 +78,7 @@ def update_gui_with_threading(current_log_file):
         update_plot(raw_data)
 
     # Schedule the next GUI update
-    root.after(1000, update_gui_with_threading, current_log_file)
+    root.after(1000, update_gui_with_threading)
 
 
 # Example usage
@@ -91,7 +89,7 @@ if __name__ == "__main__":
 
         # Start the data receiving thread
         receiver_thread = threading.Thread(target=data_receiver_thread,
-                                           args=(receiver),
+                                           args=(receiver, ),
                                            daemon=True)
         receiver_thread.start()
 
