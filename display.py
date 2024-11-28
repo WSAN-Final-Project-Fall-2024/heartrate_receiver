@@ -7,31 +7,23 @@ from datetime import datetime, timedelta
 import os
 from collections import deque
 from bluetooth_receiver import BluetoothReceiver
+import threading
+import queue
+import json
+import ast
 
 LOG_DIR = "./logs"  # Directory to store log files
 
-
-# RMSSD calculation
-def calculate_rmssd(rates):
-    diffs = np.diff(rates)
-    return np.sqrt(np.mean(diffs**2))
+selected_data = 'bpm'
 
 
-# HRSTD calculation
-def calculate_hrstd(rates):
-    return np.std(rates)
-
-
-def save_log(bpm, current_log_file):
-    if bpm < 0:
-        return
-
+def save_log(data, current_log_file):
     try:
         with open(current_log_file, "a") as log_file:
             # Get the current timestamp in a readable format
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             # Write the log with the timestamp
-            log_file.write(f"{timestamp} - {bpm}\n")
+            log_file.write(f"{timestamp} - {data}\n")
     except IOError as e:
         print(f"Error saving raw data: {e}")
 
@@ -67,36 +59,18 @@ def get_data_from_log(current_log_file):
     for i, line in enumerate(recent_lines):
         values = line.split(" - ")
         time_data.append(i)
-        heart_rates.append(int(values[0]))
+        formatted_data = ast.literal_eval(values[0])
+        heart_rates.append(formatted_data)
 
     return time_data, heart_rates
 
 
-# Update GUI with new data
-def update_data(receiver, current_log_file):
-    bpm = int(receiver.read_data())
-
-    save_log(bpm, current_log_file)
-    time_data, heart_rates = get_data_from_log(current_log_file)
-
-    # Calculate metrics
-    bpm_label.config(text=f"BPM: {bpm}")
-    ipm_label.config(text=f"IPM: {int(bpm * 1.5)}")  # Example IPM calculation
-    rmssd_label.config(text=f"RMSSD: {calculate_rmssd(heart_rates):.2f}")
-    hrstd_label.config(text=f"HRSTD: {calculate_hrstd(heart_rates):.2f}")
-
-    # Update plot with new data
-    update_plot(time_data, heart_rates)
-
-    # Schedule the next update
-    root.after(1000, update_data(receiver,
-                                 current_log_file))  # Update every second
-
-
 def update_plot(time_data, heart_rates):
-    ax.clear()  # Clear previous plot
-    print(heart_rates)
-    ax.plot(time_data, heart_rates, label="IPM / BPM",
+    bpm_data = [heart_rate['bpm'] for heart_rate in heart_rates]
+    ipm_data = [heart_rate['ipm'] for heart_rate in heart_rates]
+    ax.plot(time_data,
+            bpm_data if selected_data == 'bpm' else ipm_data,
+            label="IPM / BPM",
             color='r')  # Draw a line for the heartbeat
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Heart Rate (BPM / IPM)")
@@ -104,6 +78,71 @@ def update_plot(time_data, heart_rates):
     ax.legend()
 
     canvas.draw()  # Redraw canvas to update the plot
+
+
+data = None
+
+
+def data_receiver_thread(receiver, current_log_file):
+    """
+    Thread function for receiving data from the Bluetooth device.
+    """
+    global data
+
+    while receiver:
+        json_str = receiver.read_data()
+        data = json.loads(json_str)
+        if data.get('bpm', -1) >= 0:
+            save_log(data, current_log_file)
+
+
+def format_value(label, value, precision=2, invalid_placeholder="--"):
+    """
+    Helper function to format a value for display in the GUI.
+
+    Args:
+        label (str): The label to format (e.g., "BPM").
+        value (float or int): The value to format.
+        precision (int): The number of decimal places for formatting.
+        invalid_placeholder (str): The placeholder for invalid values.
+
+    Returns:
+        str: Formatted label string.
+    """
+    if value < 0:
+        return f"{label}: {invalid_placeholder}"
+    if isinstance(value, (float, int)):
+        return f"{label}: {value:.{precision}f}" if isinstance(
+            value, float) else f"{label}: {value}"
+    return f"{label}: {invalid_placeholder}"
+
+
+def update_gui_with_threading(current_log_file):
+    """
+    Function to update the GUI, retrieving data from the queue.
+    """
+
+    global data
+
+    raw_data = data.get('raw_data', [])
+    bpm = data.get('bpm', -1)
+    ipm = data.get('ipm', -1)
+    rmssd = data.get('rmssd', -1)
+    hrstd = data.get('hrstd', -1)
+
+    print(data)
+
+    # # Update labels using helper function
+    # bpm_label.config(text=format_value("BPM", bpm))
+    # ipm_label.config(text=format_value("IPM", ipm))
+    # rmssd_label.config(text=format_value("RMSSD", rmssd))
+    # hrstd_label.config(text=format_value("HRSTD", hrstd))
+
+    # Update plot
+    update_plot(raw_data)
+
+    # Schedule the next GUI update
+    root.after(1000, update_gui_with_threading, current_log_file)
 
 
 # Example usage
@@ -123,6 +162,12 @@ if __name__ == "__main__":
     try:
         receiver = BluetoothReceiver()
         receiver.start_server()
+
+        # Start the data receiving thread
+        receiver_thread = threading.Thread(target=data_receiver_thread,
+                                           args=(receiver, current_log_file),
+                                           daemon=True)
+        receiver_thread.start()
 
         # Set up tkinter GUI
         root = tk.Tk()
@@ -147,8 +192,8 @@ if __name__ == "__main__":
         canvas = FigureCanvasTkAgg(fig, master=root)
         canvas.get_tk_widget().grid(row=0, column=1, rowspan=6)
 
-        root.after(1000, update_data(
-            receiver, current_log_file))  # Initial call to start the loop
+        # Start the GUI update loop
+        root.after(1000, update_gui_with_threading, current_log_file)
         root.mainloop()
 
     except KeyboardInterrupt:
